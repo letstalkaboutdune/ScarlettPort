@@ -10,7 +10,7 @@
 #   -H             hidden: run in a headless gamescope instead of on the desktop
 #   -n <name>      name of the run, added to its folder
 #   -o <dir>       results folder (default screenshots/<time>[-name])
-#   -v, -p         passed to play-victory.sh
+#   -v, -p, -r     passed to play-victory.sh
 #
 # Uses the save slot "autotest", copied from "default" on first use, so automatic presses never
 # touch a real save. It refuses to run without one: whoever plays must have gone through the
@@ -20,7 +20,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 state=${XDG_DATA_HOME:-$HOME/.local/share}/scarlettport
 limit=600; every=30; after=120; out=; pass=(); keys=fast; hidden=0; name=
-while getopts 't:i:w:kHn:o:v:p:h' o; do
+while getopts 't:i:w:kHn:o:v:p:r:h' o; do
     case $o in
         t) limit=$OPTARG ;;
         i) every=$OPTARG ;;
@@ -29,7 +29,7 @@ while getopts 't:i:w:kHn:o:v:p:h' o; do
         H) hidden=1 ;;
         n) name=-$OPTARG ;;
         o) out=$OPTARG ;;
-        v|p) pass+=("-$o" "$OPTARG") ;;
+        v|p|r) pass+=("-$o" "$OPTARG") ;;
         *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
     esac
 done
@@ -94,6 +94,12 @@ while (( SECONDS - start < limit )); do
     if ! kill -0 "$run" 2>/dev/null; then reason='the program ended'; break; fi
     log=$(sed -n 's/^Log: *//p' "$out/launch.log")
     [[ -f $log ]] || continue
+    # seconds, mappings of the title's process, CPU seconds of wineserver and of the title
+    vic=$(pgrep -f '^Z:.*release.victory\.exe' | head -1 || true)
+    srv=$(pgrep -x wineserver | xargs -r -I{} sh -c 'printf "%s {}\n" "$(cut -d" " -f14 /proc/{}/stat)"' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2 || true)
+    if [[ -n $vic && -n $srv ]]; then
+        echo "$((SECONDS - start)) $(wc -l <"/proc/$vic/maps") $(awk '{print int(($14+$15)/100)}' "/proc/$srv/stat") $(awk '{print int(($14+$15)/100)}' "/proc/$vic/stat")" >>"$out/stats.txt" 2>/dev/null || true
+    fi
     if [[ -z $world ]] && grep -aq 'fast boot: in world' "$log"; then
         world=$SECONDS; echo "$((world - start)) s: in world"
     fi
