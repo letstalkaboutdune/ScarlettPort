@@ -1,0 +1,102 @@
+diff --git a/runtime/victory/crates/victory-gpu/src/indirect.rs b/runtime/victory/crates/victory-gpu/src/indirect.rs
+index ec6ecf2..3869b3a 100644
+--- a/runtime/victory/crates/victory-gpu/src/indirect.rs
++++ b/runtime/victory/crates/victory-gpu/src/indirect.rs
+@@ -46,7 +46,9 @@ ByteAddressBuffer count_buf : register(t1);
+ RWByteAddressBuffer dst_args : register(u0);
+ // The list's work so far (vertex instances, threads): past the budget,
+ // records run empty.
+-RWByteAddressBuffer budget : register(u1);
++// Structured, with the atomic functions: Wine's HLSL compiler has no atomic
++// methods of RWByteAddressBuffer.
++RWStructuredBuffer<uint> budget : register(u1);
+ static const uint BUDGET = 1u << 27;
+ // Groups of one dispatch; more run empty.
+ static const uint GROUPS = 1u << 20;
+@@ -102,8 +104,8 @@ void main(uint3 id : SV_DispatchThreadID) {
+         // Diagnostics, in the budget buffer's next words: the largest
+         // group count a mesh record asked for, and the groups asked in all.
+         uint was;
+-        budget.InterlockedMax(4, g.x, was);
+-        budget.InterlockedAdd(8, min(g.x, 1u << 24), was);
++        InterlockedMax(budget[1], g.x, was);
++        InterlockedAdd(budget[2], min(g.x, 1u << 24), was);
+         g = uint3(min(g.x, 65535u), min(g.y, 1u), min(g.z, 1u));
+         cost = g.x * g.y * g.z * 128u;
+         groups = g;
+@@ -111,12 +113,12 @@ void main(uint3 id : SV_DispatchThreadID) {
+     bool over = false;
+     if (cost > 0) {
+         uint before;
+-        budget.InterlockedOr(0, 0, before);
++        InterlockedOr(budget[0], 0, before);
+         [allow_uav_condition]
+         while (before < BUDGET) {
+             uint next = (BUDGET - before <= cost) ? BUDGET : (before + cost);
+             uint prev;
+-            budget.InterlockedCompareExchange(0, before, next, prev);
++            InterlockedCompareExchange(budget[0], before, next, prev);
+             if (prev == before) break;
+             before = prev;
+         }
+@@ -181,22 +183,28 @@ fn make() -> windows::core::Result<Clamp> {
+ fn make_for(device: &ID3D12Device) -> windows::core::Result<Clamp> {
+     let mut code: Option<ID3DBlob> = None;
+     let mut errors: Option<ID3DBlob> = None;
+-    // SAFETY: the source and names live through the call; out pointers ours.
+-    let compiled = unsafe {
+-        D3DCompile(
+-            SOURCE.as_ptr().cast(),
+-            SOURCE.len(),
+-            s!("clamp"),
+-            None,
+-            None,
+-            s!("main"),
+-            s!("cs_5_1"),
+-            0,
+-            0,
+-            &mut code,
+-            Some(&mut errors),
+-        )
++    let mut build = |source: &str| {
++        // SAFETY: the source and names live through the call; out pointers ours.
++        unsafe {
++            D3DCompile(
++                source.as_ptr().cast(),
++                source.len(),
++                s!("clamp"),
++                None,
++                None,
++                s!("main"),
++                s!("cs_5_1"),
++                0,
++                0,
++                &mut code,
++                Some(&mut errors),
++            )
++        }
+     };
++    // Microsoft's compiler wants the attribute on a loop over values from an
++    // unordered view; Wine's does not know it and does not need it.
++    let compiled =
++        build(SOURCE).or_else(|_| build(&SOURCE.replace("[allow_uav_condition]", "")));
+     if let Err(e) = compiled {
+         if let Some(errors) = errors {
+             // SAFETY: the blob's own bytes.
+@@ -832,6 +840,16 @@ void main() {
+     /// ahead with the relay, whose pieces are fetched flight by flight) it
+     /// stores the hash it made: each compare flags what changed since the
+     /// compare before it, also a change back.
++    /// The clamp builds with this machine's D3DCompile and device (Wine's
++    /// compiler lacks some methods). Nothing runs on the card.
++    #[test]
++    fn the_clamp_builds_on_the_host() {
++        victory_core::logging::init("warn");
++        if let Some(host) = crate::host::host() {
++            make_for(&host.device).expect("the clamp shader must build");
++        }
++    }
++
+     #[test]
+     fn warp_card_compare_stores_the_hash_it_made_when_told() {
+         let Some(mut warp) = WarpHarness::new() else {
