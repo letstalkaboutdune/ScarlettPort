@@ -95,9 +95,10 @@ if [[ $debug == 1 ]]; then
 fi
 
 # DLLs beside the program win over the prefix's; plain copies, removed when -v is not given.
-for dll in d3d12.dll d3d12core.dll; do
+# d3dcompiler_47.dll (Microsoft's own) is optional: Wine's refuses some of the runtime's shaders.
+for dll in d3d12.dll d3d12core.dll d3dcompiler_47.dll; do
     rm -f "$(dirname "$exe")/$dll"
-    [[ -z $vkd3d ]] || cp "$vkd3d/$dll" "$(dirname "$exe")/$dll"
+    [[ ! -f $vkd3d/$dll ]] || cp "$vkd3d/$dll" "$(dirname "$exe")/$dll"
 done
 
 echo "Proton:  $(basename "$proton")"
