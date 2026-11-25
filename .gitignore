@@ -14,6 +14,8 @@ target/
 **/MicrosoftGame.config
 !runtime/xcl/tests/data/testgame/MicrosoftGame.config
 game/
+/archive/
+/screenshots/
 dump/
 
 # Runtime DLLs you download yourself (Agility SDK, DXC)
